@@ -71,7 +71,7 @@ class Disaster:
 
         # All possible subtypes from the dataset
         subtypes = ['Ground movement', 'Tropical cyclone', 'Flash flood',
-       'Riverine flood', 'Ash fall', 'Tsunami', None, 'Convective storm',
+       'Riverine flood', 'Ash fall', 'Tsunami', 'Convective storm',
        'Landslide', 'Extra-tropical storm', 'Severe winter conditions',
        'Mudslide', 'Coastal flood', 'Heat wave', 'Avalanche',
        'Forest fire', 'Cold wave', 'Drought',
@@ -143,9 +143,11 @@ class TweetRaster:
         # Set the raster grid resolution
         self.resolution = resolution
 
-        # Initialize raster and tweets attributes as None
+        # Initialize raster, tweets and disaster attributes as None
         self.raster = None
         self.tweets = None
+        self.disasters = None
+        self.training_data = dict()
 
         # Build the raster grid
         self.build_raster()
@@ -220,6 +222,23 @@ class TweetRaster:
         self.tweets = tweets
 
 
+    def load_disasters(self, path, longitude_column, latitude_column):
+        """
+        Loads disaster data from a CSV file, create Disaster objects and store them as a list of disaster objects.
+        
+        Args:
+            path (str): Path to the CSV file containing the disaster data.
+            longitude_column (str): Name of the column containing longitude values.
+            latitude_column (str): Name of the column containing latitude values.
+        """
+
+        disasters = pd.read_csv(path)
+        disasters = disasters.dropna(subset=[longitude_column, latitude_column, "Disaster Subtype"])
+        disasters = [Disaster(row) for _, row in disasters.iterrows()]
+
+        self.disasters = disasters
+
+
     def select_most_active_pixels(self, n):
         """
         Selects the top n most active raster grid cells based on the number of tweets.
@@ -285,6 +304,69 @@ class TweetRaster:
         difference = self.raster.merge(difference, on='pixel_id')
 
         return difference
+
+
+    def create_training_data(self, days_before, days_after, write_file=True):
+        """
+        Generates the training data for a machine learning task based on given disaster events.
+        This function computes difference vectors for a given time range and stores them along with other
+        disaster features in a csv file.
+    
+        Args:
+            days_before (int): The number of days before a disaster to consider for creating the time range.
+            days_after (int): The number of days after a disaster to consider for creating the time range.
+            write_file (bool): If True, writes training data into file.
+        """
+
+        data_rows = []
+
+        if (days_before, days_after) in self.training_data:
+            print(f"Training data already computed for {days_before} days before and {days_after} days after disaster events.")
+
+            for data_row in self.training_data[(days_before, days_after)]:
+
+                feature_vector = data_row[0]
+                label_vector = np.array(pd.concat([data_row[1]['aggressiveness_diff'], data_row[1]['sentiment_diff'], data_row[1]['stance_diff']]))
+
+                data_rows.append(np.concatenate((np.nan_to_num(feature_vector), np.nan_to_num(label_vector))))
+
+        else:
+
+            self.training_data[(days_before, days_after)] = []
+
+            for disaster in self.disasters:
+
+                feature_vector = disaster.get_feature_vector()
+
+                time_range_A, time_range_B = disaster.get_time_range(days_before=days_before, days_after=days_after)
+
+                difference = self.compute_difference(time_range_A, time_range_B)
+
+                self.training_data[(days_before, days_after)].append([feature_vector, difference])
+
+                if write_file:
+
+                    label_vector = np.array(pd.concat([difference['aggressiveness_diff'], difference['sentiment_diff'], difference['stance_diff']]))
+
+                    data_rows.append(np.concatenate((np.nan_to_num(feature_vector), np.nan_to_num(label_vector))))
+
+        if write_file:
+
+            # Number of one hot encoded features
+            n_features = len(feature_vector) - 3
+        
+            # Number of pixels for each type of difference
+            n_pixels = len(label_vector) // 3
+        
+            # Create column names
+            feature_cols = ['x', 'y', 'z'] + [f'type_{i+1}' for i in range(n_features)]
+            label_cols = [f'aggressiveness_diff_{i+1}' for i in range(n_pixels)] + [f'sentiment_diff_{i+1}' for i in range(n_pixels)] + [f'stance_diff_{i+1}' for i in range(n_pixels)]
+        
+            # Convert the list of data rows into a DataFrame
+            data = pd.DataFrame(data_rows, columns=feature_cols + label_cols)
+        
+            # Write the DataFrame to a csv file
+            data.to_csv(f'training_data_{days_before}b_{days_after}a.csv', index=False)
 
 
     def plot_values(self, df, column, figsize=(24, 12)):
