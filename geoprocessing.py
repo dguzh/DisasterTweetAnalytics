@@ -5,6 +5,8 @@ import geopandas as gpd
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 from pyproj import CRS
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderQuotaExceeded
 
 class Disaster:
     """
@@ -237,6 +239,61 @@ class TweetRaster:
         disasters = [Disaster(row) for _, row in disasters.iterrows()]
 
         self.disasters = disasters
+
+
+    def geocode_disaster_dataset(self, path, longitude_column, latitude_column):
+        """
+        Loads disaster data from a CSV file and geocodes disasters that have missing coordinate values.
+
+        Args:
+            path (str): Path to the CSV file containing the disaster data.
+            longitude_column (str): Name of the column containing longitude values.
+            latitude_column (str): Name of the column containing latitude values.
+        """
+
+        disasters = pd.read_csv(path)
+
+        geolocator = Nominatim(user_agent="disaster_loader")
+
+        def geocode_row(row):
+            if pd.isna(row[longitude_column]) or pd.isna(row[latitude_column]):
+                lat, lon = self.geocode_location(geolocator, row["Country"])
+                if lat and lon:
+                    row[latitude_column] = lat
+                    row[longitude_column] = lon
+            return row
+
+        # Apply the geocoding function to each row of the DataFrame
+        disasters = disasters.apply(geocode_row, axis=1)
+
+        # Save the DataFrame to a new CSV file with the geocoded coordinates
+        disasters.to_csv(path[:-4] + "_geocoded.csv", index=False)
+
+        print(f"File created: {path[:-4]}_geocoded.csv)")
+
+
+    def geocode_location(self, geolocator, country):
+        """
+        Geocodes the given country.
+
+        Args:
+            geolocator (geopy.geocoders.Nominatim): A geolocator object for geocoding.
+            country (str): The country name.
+
+        Returns:
+            tuple: A tuple of (latitude, longitude).
+        """
+
+        try:
+            geocode_result = geolocator.geocode(country, timeout=10)
+
+            if geocode_result:
+                return geocode_result.latitude, geocode_result.longitude
+            else:
+                return None, None
+
+        except (GeocoderTimedOut, GeocoderQuotaExceeded):
+            return None, None
 
 
     def select_most_active_pixels(self, n):
