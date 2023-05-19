@@ -6,6 +6,7 @@ import geopandas as gpd
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize, LogNorm
+from matplotlib.patches import Patch
 from pyproj import CRS
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderQuotaExceeded
@@ -173,8 +174,10 @@ class TweetRaster:
         # Initialize raster, tweets and disaster attributes as None
         self.raster = None
         self.tweets = None
+        self.tweets_raw = None
         self.tweets_unfiltered = None
         self.disasters = None
+        self.disasters_raw = None
         self.training_data = dict()
 
         # Build the raster grid
@@ -218,7 +221,7 @@ class TweetRaster:
         self.raster = raster
 
 
-    def load_tweets(self, path, longitude_column, latitude_column, crs, filter_before='1900-01-01'):
+    def load_tweets(self, path, longitude_column, latitude_column, crs, filter_before='1900-01-01', filter_after='2100-12-31'):
         """
         Loads tweet data from a CSV file, processes it, and assigns tweets to raster grid cells.
         
@@ -248,6 +251,9 @@ class TweetRaster:
 
         # Filter out tweets before a specified date
         tweets = tweets.loc[tweets['created_at'] >= pd.to_datetime(filter_before)]
+        tweets = tweets.loc[tweets['created_at'] <= pd.to_datetime(filter_after)]
+
+        self.tweets_raw = tweets.copy()
 
         # Map the 'aggressiveness' and 'stance' columns to numerical values
         tweets['aggressiveness'] = tweets['aggressiveness'].map({'not aggressive': -1, 'aggressive': 1})
@@ -260,7 +266,7 @@ class TweetRaster:
         self.tweets = tweets
 
 
-    def load_disasters(self, path, longitude_column, latitude_column, filter_before='1900-01-01', filter_after='2100-12-31'):
+    def load_disasters(self, path, longitude_column, latitude_column, crs, filter_before='1900-01-01', filter_after='2100-12-31'):
         """
         Loads disaster data from a CSV file, create Disaster objects and store them as a list of disaster objects.
         
@@ -274,12 +280,20 @@ class TweetRaster:
         disasters = pd.read_csv(path)
         disasters = disasters.dropna(subset=[longitude_column, latitude_column, "Disaster Subtype"])
 
+        # Create shapely Point geometries from longitude and latitude columns
+        geometry = gpd.points_from_xy(disasters[longitude_column], disasters[latitude_column])
+
+        # Convert the DataFrame to a GeoDataFrame with the specified CRS
+        disasters = gpd.GeoDataFrame(disasters, geometry=geometry, crs=crs)
+
         # Convert 'start_date' column to datetime
         disasters['start_date'] = pd.to_datetime(disasters['start_date'])
 
         # Filter out disasters before and after e specified date
         disasters = disasters.loc[disasters['start_date'] >= pd.to_datetime(filter_before)]
         disasters = disasters.loc[disasters['start_date'] <= pd.to_datetime(filter_after)]
+
+        self.disasters_raw  = disasters.to_crs(self.mollweide_proj)
 
         # Create disaster instances and store them in a list
         disasters = [Disaster(row) for _, row in disasters.iterrows()]
@@ -556,7 +570,113 @@ class TweetRaster:
         self.training_data[(days_before, days_after)][attribute] = training_data_df
 
 
-    def map_counts(self, figsize=(24, 12)):
+    def map_points_tweets(self, attribute=None, sample_size=100000, figsize=(24, 12)):
+        """
+        Plot a map of tweet attributes based on a sample of tweet data.
+    
+        Args:
+            sample_size (int, optional): The number of tweets to include in the sample. Defaults to 100000.
+            figsize (tuple, optional): A tuple specifying the size of the figure. Defaults to (24, 12).
+        """
+    
+        custom_colors = {
+            'aggressiveness': {'not aggressive': '#3A4CC0', 'aggressive': '#B30326'},
+            'sentiment': {'positive': '#3A4CC0', 'neutral': '#DDDCDB', 'negative': '#B30326'},
+            'stance': {'believer': '#3A4CC0', 'neutral': '#DDDCDB', 'denier': '#B30326'},
+            }
+    
+        # Sample tweets from the raw data based on the specified sample size
+        df = self.tweets_raw.sample(sample_size)
+
+        if attribute == 'sentiment':
+
+            def assign_category(value):
+                """
+                Assigns a sentiment category based on the given sentiment value.
+        
+                Args:
+                    value (float): The sentiment value.
+        
+                Returns:
+                    str: The corresponding sentiment category.
+                """
+                if value < -0.25:
+                    return 'negative'
+                elif value <= 0.25:
+                    return 'neutral'
+                else:
+                    return 'positive'
+        
+            # Map the 'sentiment' column to its corresponding category
+            df[attribute] = df[attribute].apply(assign_category)
+
+        if attribute:
+            # Map the attribute column to its corresponding color
+            color = df[attribute].map(custom_colors[attribute])
+        else:
+            color = '#00ACEE'
+    
+        # Create a figure and axis with the specified figsize
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    
+        # Set the background color of the axis
+        ax.set_facecolor('lightgray')
+    
+        # Plot the basemap on the axis with dark gray color, black edge color, and a linewidth of 0.5
+        self.basemap.plot(ax=ax, color='darkgray', edgecolor='black', linewidth=0.5)
+    
+        # Plot the tweets on the map using the assigned colors
+        df.plot(color=color, linewidth=0.5, edgecolor='black', legend=True, ax=ax)
+    
+        if attribute:
+            # Create legend elements for the custom colors
+            legend_elements = [Patch(facecolor=color, edgecolor='black', label=level) for level, color in custom_colors[attribute].items()]
+        
+            # Add the legend to the upper right corner of the plot
+            ax.legend(handles=legend_elements, loc='upper right')
+
+
+    def map_points_disasters(self, attribute=None, figsize=(24, 12)):
+        """
+        Plot a map of disaster data based on a specified attribute.
+    
+        Args:
+            attribute (str): The attribute of the disaster data to plot.
+            figsize (tuple, optional): A tuple specifying the size of the figure. Defaults to (24, 12).
+        """
+    
+        df = self.disasters_raw
+
+        # Normalize values if markersize should vary with specified attribute
+        if attribute:
+    
+            min_value = df[attribute].min()
+            max_value = df[attribute].max()
+        
+            normalized_min = 50
+            normalized_max = 10000
+        
+            # Normalize the attribute values to a predefined range
+            markersize = ((df[attribute] - min_value) / (max_value - min_value)) * (normalized_max - normalized_min) + normalized_min
+        
+        else:
+
+            markersize = 50
+
+        # Create a figure and axis with the specified figsize
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    
+        # Set the background color of the axis
+        ax.set_facecolor('lightgray')
+    
+        # Plot the basemap on the axis with dark gray color, black edge color, and a linewidth of 0.5
+        self.basemap.plot(ax=ax, color='darkgray', edgecolor='black', linewidth=0.5)
+    
+        # Plot the disaster data on the map using a predefined color, marker size, and specified attributes
+        df.plot(color='#D73502', markersize=markersize, alpha=0.8, linewidth=0.5, edgecolor='black', legend=True, ax=ax)
+
+
+    def map_raster_counts(self, figsize=(24, 12)):
         """
         Plot a count map based on tweet data.
 
@@ -588,7 +708,7 @@ class TweetRaster:
         plt.show()
 
 
-    def map_means(self, attribute, figsize=(24, 12)):
+    def map_raster_means(self, attribute, figsize=(24, 12)):
         """
         Plot a mean map of a given attribute based on tweet data.
 
@@ -618,7 +738,7 @@ class TweetRaster:
         plt.show()
 
 
-    def map_change(self, attribute, days_before, days_after, disaster, figsize=(24, 12)):
+    def map_raster_change(self, attribute, days_before, days_after, disaster, figsize=(24, 12)):
         """
         Plot a change map of a given attribute based on tweet data for specified days before and after a disaster.
 
