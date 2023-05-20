@@ -1,17 +1,23 @@
 import warnings
+from datetime import datetime, timedelta
+
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-import geopandas as gpd
-from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize, LogNorm
-from matplotlib.patches import Patch
-from pyproj import CRS
+
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderQuotaExceeded
+from pyproj import CRS
+
+import geopandas as gpd
+from shapely.geometry import Polygon
+
+from matplotlib.colors import Normalize, LogNorm, ListedColormap
+from matplotlib.patches import Patch
+
 from scipy.stats import ttest_ind, chi2_contingency
 from sklearn.preprocessing import OneHotEncoder
+
 
 class Disaster:
     """
@@ -147,7 +153,7 @@ class TweetRaster:
     for further analysis and visualization.
     
     Attributes:
-        resolution (float): The resolution of the raster grid in meters.
+        resolution (float): The resolution of the raster grid in 100k degrees.
         mollweide_proj (CRS): The Mollweide projection used for the raster grid.
         basemap (GeoDataFrame): The basemap data in the Mollweide projection.
         raster (GeoDataFrame): The raster grid cells as a GeoDataFrame.
@@ -159,7 +165,7 @@ class TweetRaster:
         Initializes a TweetRaster object with the specified raster grid resolution.
         
         Args:
-            resolution (float): The resolution of the raster grid in meters.
+            resolution (float): The resolution of the raster grid in degrees.
         """
 
         # Set the Mollweide projection for the raster grid
@@ -169,7 +175,7 @@ class TweetRaster:
         self.basemap = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres')).to_crs(self.mollweide_proj)
 
         # Set the raster grid resolution
-        self.resolution = resolution
+        self.resolution = resolution * 100000
 
         # Initialize raster, tweets and disaster attributes as None
         self.raster = None
@@ -425,7 +431,7 @@ class TweetRaster:
             tweets_B_pixel = tweets_B[tweets_B['pixel_id'] == pixel_id]
     
             # Perform t-test for sentiment if there are tweets in both time ranges
-            if not tweets_A_pixel['sentiment'].empty and not tweets_B_pixel['sentiment'].empty:
+            if len(tweets_A_pixel['sentiment']) >= 30 and len(tweets_B_pixel['sentiment']) >= 30:
                 with warnings.catch_warnings():
                     warnings.filterwarnings('error')  # Treat warnings as exceptions
                     try:
@@ -433,11 +439,13 @@ class TweetRaster:
                         if p_val < 0.05:  # if change is significant
                             mean_diff = tweets_B_pixel['sentiment'].mean() - tweets_A_pixel['sentiment'].mean()
                             change.loc[change['pixel_id'] == pixel_id, 'sentiment_change'] = 1 if mean_diff > 0 else -1
+                        else:
+                            change.loc[change['pixel_id'] == pixel_id, 'sentiment_change'] = 0
                     except Warning:
                         pass  # Ignore precision loss warnings
     
             # Perform Chi-Square test for homogeneity for aggressiveness if there are tweets in both time ranges
-            if not tweets_A_pixel['aggressiveness'].empty and not tweets_B_pixel['aggressiveness'].empty:
+            if len(tweets_A_pixel['aggressiveness']) >= 30 and len(tweets_B_pixel['aggressiveness']) >= 30:
                 # Get the value counts for each group
                 counts_A = tweets_A_pixel['aggressiveness'].value_counts()
                 counts_B = tweets_B_pixel['aggressiveness'].value_counts()
@@ -451,9 +459,11 @@ class TweetRaster:
                 if p_val < 0.05:  # if change is significant
                     mean_diff = tweets_B_pixel['aggressiveness'].mean() - tweets_A_pixel['aggressiveness'].mean()
                     change.loc[change['pixel_id'] == pixel_id, 'aggressiveness_change'] = 1 if mean_diff > 0 else -1
+                else:
+                    change.loc[change['pixel_id'] == pixel_id, 'aggressiveness_change'] = 0
     
             # Perform Chi-Square test for homogeneity for stance if there are tweets in both time ranges
-            if not tweets_A_pixel['stance'].empty and not tweets_B_pixel['stance'].empty:
+            if len(tweets_A_pixel['stance']) >= 30 and len(tweets_B_pixel['stance']) >= 30:
                 # Get the value counts for each group
                 counts_A = tweets_A_pixel['stance'].value_counts()
                 counts_B = tweets_B_pixel['stance'].value_counts()
@@ -467,6 +477,11 @@ class TweetRaster:
                 if p_val < 0.05:  # if change is significant
                     mean_diff = tweets_B_pixel['stance'].mean() - tweets_A_pixel['stance'].mean()
                     change.loc[change['pixel_id'] == pixel_id, 'stance_change'] = 1 if mean_diff > 0 else -1
+                else:
+                    change.loc[change['pixel_id'] == pixel_id, 'stance_change'] = 0
+
+        # Filter out rows with any NaN values
+        change = change.dropna()
     
         # Create a new GeoDataFrame containing the changes in tweet attributes for each raster grid cell
         change = self.raster.merge(change, on='pixel_id')
@@ -491,11 +506,12 @@ class TweetRaster:
         if (days_before, days_after) not in self.training_data:
             self.training_data[(days_before, days_after)] = {attribute: pd.DataFrame()}
 
+        elif attribute not in self.training_data[(days_before, days_after)]:
+            self.training_data[(days_before, days_after)][attribute] = pd.DataFrame()
+
         n_disasters = len(self.disasters)
 
         for disaster in self.disasters:
-
-            print(f"Creating training data for Disaster {self.disasters.index(disaster)}/{n_disasters}.")
 
             time_range_A, time_range_B = disaster.get_time_range(days_before=days_before, days_after=days_after)
             changes = self.compute_change(time_range_A, time_range_B)
@@ -514,8 +530,6 @@ class TweetRaster:
 
                 # Get the change for the current attribute
                 attribute_change = change[f'{attribute}_change']
-                if np.isnan(attribute_change):
-                    attribute_change = 0
                 attribute_change_encoded = encoder.fit_transform([[attribute_change]])
 
                 # Create a data row for the current disaster-pixel pair
@@ -524,6 +538,8 @@ class TweetRaster:
 
             df = pd.DataFrame(data_rows)
             self.training_data[(days_before, days_after)][attribute] = pd.concat([self.training_data[(days_before, days_after)][attribute], df])
+            
+            print(f"Creating {len(data_rows)} training samples for Disaster {self.disasters.index(disaster) + 1}/{n_disasters}.")
 
         # Number of one hot encoded features
         n_features = len(self.disasters[0].one_hot_subtype)
@@ -546,7 +562,7 @@ class TweetRaster:
         """
 
         # Get the DataFrame for the given attribute and time range and write it to a CSV file
-        self.training_data[(days_before, days_after)][attribute].to_csv(f'training_data_{attribute}_{days_before}b_{days_after}a.csv', index=False)
+        self.training_data[(days_before, days_after)][attribute].to_csv(f'training_data/training_data_{int(self.resolution / 100000)}deg_{attribute}_{days_before}db_{days_after}da.csv', index=False)
 
     
     def load_training_data(self, attribute, days_before, days_after):
@@ -560,7 +576,7 @@ class TweetRaster:
         """
     
         # Define the file name based on the attribute and time range
-        file_name = f'training_data_{attribute}_{days_before}b_{days_after}a.csv'
+        file_name = f'training_data/training_data_{int(self.resolution / 100000)}deg_{attribute}_{days_before}db_{days_after}da.csv'
     
         # Load the CSV file into a DataFrame
         training_data_df = pd.read_csv(file_name)
@@ -570,7 +586,7 @@ class TweetRaster:
         self.training_data[(days_before, days_after)][attribute] = training_data_df
 
 
-    def map_points_tweets(self, attribute=None, sample_size=100000, figsize=(24, 12)):
+    def map_points_tweets(self, attribute=None, sample_size=100000, raster=False, figsize=(24, 12)):
         """
         Plot a map of tweet attributes based on a sample of tweet data.
     
@@ -624,6 +640,10 @@ class TweetRaster:
     
         # Plot the basemap on the axis with dark gray color, black edge color, and a linewidth of 0.5
         self.basemap.plot(ax=ax, color='darkgray', edgecolor='black', linewidth=0.5)
+
+        # Optionally add the raster to the background
+        if raster:
+            self.raster.plot(facecolor=(0, 0, 0, 0), linewidth=0.5, edgecolor='black', legend=True, ax=ax)
     
         # Plot the tweets on the map using the assigned colors
         df.plot(color=color, linewidth=0.5, edgecolor='black', legend=True, ax=ax)
@@ -741,7 +761,7 @@ class TweetRaster:
     def map_raster_change(self, attribute, days_before, days_after, disaster, figsize=(24, 12)):
         """
         Plot a change map of a given attribute based on tweet data for specified days before and after a disaster.
-
+    
         Args:
             attribute (str): The attribute for which to calculate the change.
             days_before (int): Number of days before the disaster to consider.
@@ -749,23 +769,38 @@ class TweetRaster:
             disaster (Disaster object): The disaster event to consider.
             figsize (tuple, optional): A tuple specifying the size of the figure. Defaults to (24, 12).
         """
-
+    
         # Compute time ranges before and after the disaster
         time_range_A, time_range_B = disaster.get_time_range(days_before=days_before, days_after=days_after)
-
+    
         # Compute the change between the two time ranges
         change = self.compute_change(time_range_A, time_range_B)
-
+    
         # Create a figure and axis with the specified figsize
         fig, ax = plt.subplots(1, 1, figsize=figsize)
-
+    
         # Set the background color of the axis
         ax.set_facecolor('lightgray')
-
+    
         # Plot the basemap on the axis with dark gray color, black edge color, and a linewidth of 0.5
         self.basemap.plot(ax=ax, color='darkgray', edgecolor='black', linewidth=0.5)
-
-        change.plot(column=attribute, cmap='PiYG', linewidth=0.5, edgecolor='black', legend=True, ax=ax, missing_kwds={"color": "white"})
-
+    
+        # Define a colormap for your three categories
+        cmap = ListedColormap(['#d1740f', '#f1f1f1', '#735ea2'])  # these are colors from PiYG palette for -1, 0, 1 respectively
+    
+        # Plot the change, now using the categorical colormap
+        change.plot(column=attribute, cmap=cmap, linewidth=0.5, edgecolor='black', legend=False, ax=ax)
+    
+        # Create legend elements for the custom colors
+        legend_labels = {'significant positive change': '#735ea2',
+                         'no significant change': '#f1f1f1',
+                         'significant negative change': '#d1740f'}
+    
+        legend_elements = [Patch(facecolor=color, edgecolor='black', label=label)
+                           for label, color in legend_labels.items()]
+    
+        # Add the legend to the upper right corner of the plot
+        ax.legend(handles=legend_elements, loc='upper right')
+    
         # Display the plot
         plt.show()
