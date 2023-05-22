@@ -9,19 +9,19 @@ This project focuses on how social media responses, specifically those found on 
 
 **Please refer to individual files for more detailed descriptions, explanations and code demonstrations.**
 
-#### `geoprocessing.py`
+#### [`geoprocessing.py`](https://github.com/dguzh/DisasterTweetAnalytics/blob/main/geoprocessing.py)
 This custom Python module provides the core geospatial processing functionality used throughout this project. It defines two main classes: Disaster and TweetRaster. The Disaster class represents a disaster instance, while TweetRaster class helps in rasterizing the Tweet data into a set of pixels, allowing us to handle the data in a spatially aggregated manner.
 
-#### `geoprocessing_demo.ipynb`
+#### [`geoprocessing_demo.ipynb`](https://github.com/dguzh/DisasterTweetAnalytics/blob/main/geoprocessing_demo.ipynb)
 This Jupyter notebook demonstrates the functionality of the geoprocessing module, which includes disaster data loading, tweet rasterization, and data preprocessing. It's a great way to understand the core geospatial processing methods.
 
-#### `dataset_compiler.ipynb`
+#### [`dataset_compiler.ipynb`](https://github.com/dguzh/DisasterTweetAnalytics/blob/main/dataset_compiler.ipynb)
 This Jupyter notebook is responsible for generating the training data. It loads tweets and disaster data, rasterizes the tweets into a set of pixels, calculates the semantic changes in response to natural disasters, and exports a variety of training datasets for machine learning models.
 
-#### `model_trainer.ipynb`
+#### [`model_trainer.ipynb`](https://github.com/dguzh/DisasterTweetAnalytics/blob/main/model_trainer.ipynb)
 This Jupyter notebook is where the deep learning models are defined and trained. Using a Fully Connected Neural Network (or Dense Network), it reads the training datasets created by the `dataset_compiler.ipynb` notebook, trains models on this data, and evaluates their performance. For each semantic attribute, models are created and evaluated using different time windows around a natural disaster event to understand how these time frames affect predictability.
 
-#### `exploratory_analysis.ipynb`
+#### [`exploratory_analysis.ipynb`](https://github.com/dguzh/DisasterTweetAnalytics/blob/main/exploratory_analysis.ipynb)
 This Jupyter notebook was used to get an overview of the data, learn about the attributes of the datasets, and decide on thresholds that were later used to generate training data and build the models.
 
 
