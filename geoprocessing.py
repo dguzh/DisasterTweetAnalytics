@@ -737,6 +737,11 @@ class TweetRaster:
             figsize (tuple, optional): A tuple specifying the size of the figure. Defaults to (24, 12).
         """
 
+        if attribute == 'aggressiveness':
+            cmap = 'coolwarm'
+        else:
+            cmap = 'coolwarm_r'
+
         # Group tweets by pixel_id and compute the mean of numeric data
         means = self.tweets.groupby('pixel_id').mean(numeric_only=True)
 
@@ -752,7 +757,7 @@ class TweetRaster:
         # Plot the basemap on the axis with dark gray color, black edge color, and a linewidth of 0.5
         self.basemap.plot(ax=ax, color='darkgray', edgecolor='black', linewidth=0.5)
 
-        df.plot(column=attribute, cmap='coolwarm', linewidth=0.5, edgecolor='black', legend=True, ax=ax, missing_kwds={"color": "white"})
+        df.plot(column=attribute, cmap=cmap, linewidth=0.5, edgecolor='black', legend=True, ax=ax, missing_kwds={"color": "white"})
 
         # Display the plot
         plt.show()
