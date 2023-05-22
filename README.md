@@ -3,7 +3,11 @@
 
 **by Aiyana Signer, Diego Gomes, Nathalie Nitsingam & Stylianos Psychias**
 
-This project focuses on how social media responses, specifically those found on Twitter, change in the face of natural disasters. It investigates how semantic attributes of tweets, specifically aggressiveness, sentiment, and stance toward climate change, change when a natural disaster occurs. The process involves the generation of training data from tweets and disaster events, the training of deep learning models, and an analysis of the results.
+This project is centered around the exploration and analysis of semantic changes in Twitter data in response to natural disasters. Specifically, it focuses on changes in aggressiveness, sentiment, and stance attributes of tweets when a disaster event occurs. However, the heart of this project lies in investigating the existence of inherent spatial patterns in these responses.
+
+By structuring our data geographically and considering the locations of the disasters, we inherently encode spatial information into our models. This allows us to investigate not just how tweet attributes change in response to disasters, but also how these changes exhibit spatial patterns. The tweets are rasterized into a set of pixels and each pixel's attributes are analyzed, turning the tweet data into a spatially-oriented dataset. In this way, our predictive models are trained with coordinates (of the disaster event and the corresponding rasterized pixel) and must learn to make predictions that reflect spatial patterns.
+
+Ultimately, a successful prediction by our models suggests that there are indeed spatial patterns in how people respond to natural disasters on Twitter, and that these patterns can be effectively learned and predicted. 
 
 ### Components
 
